@@ -1,0 +1,54 @@
+[project]
+name = "rag-experiment-framework"
+version = "0.0.0"
+description = "RAG 부품을 바꿔 끼우며 다시 만들 수 있고 공정하게 비교하는 실험 프레임워크"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "석한나" }]
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "typer>=0.29.1",
+]
+
+[project.scripts]
+ragexp = "ragexp.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "ragexp"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# 문서 속 코드 블록(설계 예시)은 포맷하지 않는다.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "-m", "not network"]
+markers = ["network: 실제 네트워크가 필요한 시험(기본 제외)"]
+
+[tool.mypy]
+strict = true
+files = ["src"]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "pre-commit>=4.7.0",
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
