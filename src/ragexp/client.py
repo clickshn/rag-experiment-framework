@@ -166,11 +166,14 @@ class ChatClient:
         self._max_attempts = 1 + settings.run.max_retries
         self._path = base_url + "/chat/completions"
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self._proxy = settings.proxy
         self._http = httpx.Client(
             transport=transport,
             headers=headers,
             timeout=httpx.Timeout(self._timeout_s, connect=CONNECT_TIMEOUT_S),
             follow_redirects=False,
+            # proxy: none이면 환경 변수·시스템 프록시를 읽지 않는다(사내망 직접 연결).
+            trust_env=settings.proxy == "env",
         )
 
     def __repr__(self) -> str:
@@ -245,10 +248,12 @@ class ChatClient:
             response = self._http.post(self._path, json=body)
         except httpx.TimeoutException as exc:
             if isinstance(exc, httpx.ConnectTimeout):
-                return _Failure("timeout", f"연결 시간 초과({CONNECT_TIMEOUT_S:g}초)")
+                msg = f"연결 시간 초과({CONNECT_TIMEOUT_S:g}초)"
+                return _Failure("timeout", msg + self._proxy_hint())
             return _Failure("timeout", f"응답 시간 초과({self._timeout_s:g}초)")
         except httpx.NetworkError as exc:
-            return _Failure("connect", f"연결 실패({type(exc).__name__})")
+            hint = self._proxy_hint() if isinstance(exc, httpx.ConnectError) else ""
+            return _Failure("connect", f"연결 실패({type(exc).__name__}){hint}")
         except httpx.RemoteProtocolError:
             return _Failure("connect", "연결 실패(서버가 응답 중 연결을 끊음)")
         except httpx.HTTPError as exc:
@@ -267,6 +272,12 @@ class ChatClient:
         if 400 <= status < 500:
             return _Failure("client_error", f"HTTP {status}")
         return _Failure("other", f"HTTP {status}", retry_after)  # 1xx·3xx(리다이렉트는 안 따름)
+
+    def _proxy_hint(self) -> str:
+        """프록시 없이 연결을 맺지 못했을 때 붙이는 안내(주소·키는 넣지 않음)."""
+        if self._proxy == "none":
+            return ". 회사 프록시가 필요하면 이 모델 설정에 proxy: env"
+        return ""
 
     # --- 대기 -------------------------------------------------------------------------
 

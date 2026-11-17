@@ -582,3 +582,21 @@ def test_run_not_injected_without_run_field(tmp_path: Path, fake_registry: Regis
     assert judge.cfg.model_dump() == {"model": "judge-y"}  # run이 넘어오지 않았다
     assert loaded.judges[2].run.timeout_s == 5  # 실행 설정은 JudgeConfig.run으로만 간다
     assert loaded.judges[0].component.received == {}  # config_model 없는 코드 규칙 판정
+
+
+def test_proxy_setting_is_per_model_and_not_hashed(tmp_path: Path, fake_registry: Registry) -> None:
+    """proxy는 모델별 접속 설정이다. arm마다 다르게 쓸 수 있고 fingerprint에 들어가지 않는다."""
+    data = mutate(lambda d: d["generators"]["A"].update(proxy="env"))
+    loaded = load_config(write(tmp_path, data), fake_registry, env=ENV)
+    a, b = loaded.arms["A"].generator, loaded.arms["B"].generator
+    assert a.cfg.proxy == "env" and b.cfg.proxy == "none"
+    (tmp_path / "base").mkdir()
+    base = load_config(write(tmp_path / "base", BASE_TEXT), fake_registry, env=ENV)
+    fp = fake_registry.component_fingerprint(a)
+    assert fp == fake_registry.component_fingerprint(base.arms["A"].generator)
+    assert "proxy" not in fp
+
+
+def test_proxy_unknown_value_rejected(tmp_path: Path, fake_registry: Registry) -> None:
+    data = mutate(lambda d: d["generators"]["A"].update(proxy="corp"))
+    assert "generators.A" in errors_of(tmp_path, fake_registry, data)

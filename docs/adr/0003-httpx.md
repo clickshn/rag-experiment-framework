@@ -20,6 +20,7 @@
 - `src/ragexp/client.py`의 `ChatClient`만 httpx를 부른다. 부품은 이 클라이언트를 쓴다.
 - httpx 예외는 종류(클래스)만 보고 `error_kind`로 바꾼다. 예외 문자열(주소가 들어 있음)은 쓰지 않는다.
 - 리다이렉트는 따라가지 않는다(`follow_redirects=False`). 3xx는 모르는 상태 코드로 다룬다.
+- 프록시는 모델별 설정 `proxy`로 정한다. 기본 `none`은 `trust_env=False`라 환경 변수·Windows 시스템 프록시를 읽지 않는다(httpx는 Windows 프록시 예외 목록을 반영하지 않아, 켜 두면 사내망 호출이 키를 실은 채 프록시를 지날 수 있다). `env`일 때만 `trust_env=True`다.
 - 시험은 `httpx.MockTransport`와 표준 라이브러리 `http.server` 가짜 서버로 한다(네트워크 없음).
 - httpx·httpcore 로거는 INFO 수준에서 요청 주소를 찍는다. 로깅을 설정하는 U6에서 WARNING으로 묶는다(설계 §5 "알려진 남는 위험").
 

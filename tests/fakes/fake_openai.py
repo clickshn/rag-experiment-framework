@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import TracebackType
 from typing import Any, Self
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -117,6 +118,7 @@ class FakeOpenAIServer:
 
     `scripts`는 모델 이름 → (상태 코드, 본문) 목록이다. 차례로 돌려주고, 마지막 것은 되풀이한다.
     `base_url`은 `/v1`까지 포함한다. `/v1/chat/completions`가 아닌 경로는 404다.
+    프록시 주소로 쓰면 절대 주소 꼴 요청도 받아 답한다(`requests[i]["path"]`에 그대로 남음).
     """
 
     def __init__(self, scripts: Mapping[str, Sequence[tuple[int, Mapping[str, Any]]]]) -> None:
@@ -150,7 +152,8 @@ class FakeOpenAIServer:
                         {"path": self.path, "body": body, "auth": self.headers.get("Authorization")}
                     )
                 payload: Mapping[str, Any]
-                if self.path != "/v1/chat/completions":
+                # 프록시로 쓰일 때는 경로가 절대 주소 꼴(http://대상/v1/...)로 온다.
+                if urlsplit(self.path).path != "/v1/chat/completions":
                     status, payload = 404, {"error": {"message": "no route"}}
                 else:
                     status, payload = server._next(str(body.get("model")))

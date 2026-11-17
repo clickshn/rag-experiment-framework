@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import email.utils
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -462,8 +463,9 @@ def test_latency_and_total_when_all_fail() -> None:
 # --- 기준 10: 실제 소켓 ---------------------------------------------------------------
 
 
-def _socket_client(server: FakeOpenAIServer) -> ChatClient:
-    return ChatClient(settings(base_url=server.base_url), sleep=lambda s: None)
+def _socket_client(server: FakeOpenAIServer, proxy: str = "none") -> ChatClient:
+    """실제 소켓 시험은 프록시를 명시적으로 끈다(시스템 프록시가 켜진 PC에서도 직접 연결)."""
+    return ChatClient(settings(base_url=server.base_url, proxy=proxy), sleep=lambda s: None)
 
 
 def test_real_socket_success() -> None:
@@ -483,3 +485,66 @@ def test_real_socket_503_then_success() -> None:
         answer = client.chat(MSG)
     assert answer.text == "다시 답" and answer.attempts == 2 and len(server.requests) == 2
     assert answer.usage.total_ms is not None and answer.usage.total_ms >= answer.usage.latency_ms
+
+
+# --- 프록시(모델별 접속 설정) -----------------------------------------------------------
+
+PROXY_ENV = (
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+)
+
+
+@pytest.fixture
+def env_proxy(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeOpenAIServer]:
+    """환경 변수 HTTP_PROXY가 가리키는 가짜 프록시. 받은 요청은 '프록시 경유'로 답한다."""
+    with FakeOpenAIServer({"model-a": [(200, chat_body("프록시 경유"))]}) as proxy:
+        for name in PROXY_ENV:
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("HTTP_PROXY", proxy.base_url.removesuffix("/v1"))
+        yield proxy
+
+
+def test_proxy_default_is_none() -> None:
+    assert settings().proxy == "none"
+
+
+def test_proxy_none_ignores_env_proxy(env_proxy: FakeOpenAIServer) -> None:
+    with (
+        FakeOpenAIServer({"model-a": [(200, chat_body("직접"))]}) as target,
+        ChatClient(settings(base_url=target.base_url), sleep=lambda s: None) as client,
+    ):
+        answer = client.chat(MSG)
+    assert answer.text == "직접" and len(target.requests) == 1
+    assert env_proxy.requests == []
+
+
+def test_proxy_env_follows_env_proxy(env_proxy: FakeOpenAIServer) -> None:
+    with (
+        FakeOpenAIServer({"model-a": [(200, chat_body("직접"))]}) as target,
+        _socket_client(target, proxy="env") as client,
+    ):
+        answer = client.chat(MSG)
+    assert answer.text == "프록시 경유" and target.requests == []
+    assert env_proxy.requests[0]["path"] == target.base_url + "/chat/completions"
+
+
+@pytest.mark.parametrize("exc", [httpx.ConnectError, httpx.ConnectTimeout])
+def test_proxy_hint_on_connect_failure(exc: type[httpx.RequestError]) -> None:
+    answer, _, _ = run([Step(exc=exc)] * 3)
+    assert "회사 프록시가 필요하면 이 모델 설정에 proxy: env" in answer.error
+    assert_no_leak(answer)
+    with_env, _, _ = run([Step(exc=exc)] * 3, proxy="env")
+    assert "proxy: env" not in with_env.error  # 이미 프록시를 따르는 설정이면 안내하지 않는다
+
+
+def test_proxy_hint_not_on_other_failures() -> None:
+    for step in (Step(exc=httpx.ReadError), Step(exc=httpx.ReadTimeout), Step(status=503)):
+        answer, _, _ = run([step] * 3)
+        assert "proxy" not in answer.error

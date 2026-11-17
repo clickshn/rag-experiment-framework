@@ -9,6 +9,8 @@ disable-model-invocation: true
 
 `docs/units/U$ARGUMENTS.md` 끝에 "결과" 절을 덧붙이고, 머리의 `상태:`를 갱신한다.
 
+**결과 절·커밋 메시지·사람에게 하는 최종 보고는 모두 한국어로 쓴다.** 도구 결과가 영어여도 마찬가지다. 최종 보고를 영어로 쓰지 않는다.
+
 ## 쓰는 내용
 
 ```markdown

@@ -286,6 +286,9 @@ class ModelSettings(_Strict):
     params: dict[str, JsonValue] = Field(default_factory=dict)
     base_url: SecretStr
     api_key: SecretStr | None = None
+    proxy: Literal["none", "env"] = "none"
+    """접속 경로(해시 밖). none: 프록시 없이 직접 연결(기본). env: 환경 변수·시스템 프록시를 따른다.
+    모델마다 정한다(상용 API는 회사 프록시, 로컬 서버는 사내망 직접처럼 한 실행에 섞이므로)."""
     run: RunSettings = Field(default_factory=RunSettings)
 
     @field_validator("base_url")
@@ -314,7 +317,10 @@ class ModelSettings(_Strict):
         return value
 
     def fingerprint_items(self) -> dict[str, Any]:
-        """fingerprint에 넣을 값: model·revision·params(None은 뺌). 접속 칸은 넣지 않는다."""
+        """fingerprint에 넣을 값: model·revision·params(None은 뺌).
+
+        접속 칸(base_url·api_key·proxy)과 실행 설정(run)은 넣지 않는다.
+        """
         return drop_none({"model": self.model, "revision": self.revision, "params": self.params})
 
 
