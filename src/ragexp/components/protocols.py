@@ -10,6 +10,7 @@
 - `fingerprint_allow: ClassVar[frozenset[str]]`: fingerprint 금지 이름 규칙의 예외(정상 파라미터)
 - `config_model: ClassVar[type | None]`: 설정 스키마(U2에서 쓰임)
 - `needs_gold: ClassVar[bool]`(Retriever만): 정답 근거가 필요한 검색기(oracle). 기본 False
+- `judge_kind: ClassVar[Literal["code", "model"]]`(Judge만): 판정 성격. role 검사에 쓴다
 """
 
 from __future__ import annotations
@@ -91,14 +92,23 @@ class Reranker(Component, Protocol):
 
 @runtime_checkable
 class Generator(Component, Protocol):
-    """근거로 답을 만든다. 입력에는 정답 정보가 없다."""
+    """근거로 답을 만든다. 입력에는 정답 정보가 없다.
+
+    약속: 구성 로더는 생성기 설정에 `prompt_template: str`(프롬프트 파일 내용)을 넣어 준다.
+    생성기는 config_model에 이 칸을 둬야 한다(`ragexp.config.GeneratorSettings`를 상속하면 됨).
+    렌더링 코드가 바뀌면 생성기 `version`을 올린다.
+    """
 
     def generate(self, inp: GenerationInput, context: Sequence[Chunk]) -> Answer: ...
 
 
 @runtime_checkable
 class Judge(Component, Protocol):
-    """답을 채점한다. 블라인드 보기만 받고, 정오는 내지 않는다(코드가 계산)."""
+    """답을 채점한다. 블라인드 보기만 받고, 정오는 내지 않는다(코드가 계산).
+
+    선택 클래스 속성 `judge_kind: ClassVar[Literal["code", "model"]]`를 밝히면, 구성 로더가
+    판정 역할(role)과 맞는지 검사한다(code는 rules만, model은 rules 불가).
+    """
 
     def judge(self, question: JudgeQuestion, response: JudgeInput) -> Verdict: ...
 

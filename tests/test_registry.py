@@ -337,3 +337,16 @@ def test_unregistered_object_rejected(reg: Registry) -> None:
         reg.component_fingerprint(Elsewhere())
     with pytest.raises(RegistryError, match="등록된 부품이 아닙니다"):
         reg.component_fingerprint(object())
+
+
+def test_component_fingerprint_drops_none(reg: Registry) -> None:
+    """None 칸은 모든 부품 fingerprint에서 뺀다(U2 구현 검토 지적 3)."""
+    obj = reg.create("generator", "fake", {"a": 1, "new_opt": None, "c": [{"d": None, "e": 2}]})
+    assert reg.component_fingerprint(obj) == {
+        "type": "fake",
+        "version": "1",
+        "a": 1,
+        "c": [{"e": 2}],
+    }
+    plain = reg.create("generator", "fake", {"a": 1, "c": [{"e": 2}]})
+    assert reg.component_fingerprint(obj) == reg.component_fingerprint(plain)

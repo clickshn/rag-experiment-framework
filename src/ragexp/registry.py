@@ -24,6 +24,8 @@ from importlib import metadata
 from types import ModuleType
 from typing import Any, Final, Literal, TypeVar, cast, get_args
 
+from pydantic import ValidationError
+
 from ragexp.components.protocols import (
     Chunker,
     Corpus,
@@ -36,6 +38,7 @@ from ragexp.components.protocols import (
     VectorStore,
 )
 from ragexp.fingerprint import FORBIDDEN_NAMES, check_fingerprint, normalize_name
+from ragexp.versioning import drop_none
 
 ComponentKind = Literal[
     "corpus",
@@ -281,13 +284,34 @@ class Registry:
     def create(self, kind: ComponentKind, name: str, config: Mapping[str, Any]) -> Any:
         """설정으로 부품을 만든다. meta는 받지 않는다(U2가 떼어 낸 뒤 넘김).
 
-        생성자 오류 메시지에는 설정 값(주소·키가 있을 수 있음)을 넣지 않고 키 이름만 넣는다.
+        부품에 `config_model`(pydantic 모델)이 있으면 그것으로 검증한 뒤 `cls(validated)`로 만들고,
+        없으면 `cls(**config)`로 만든다.
+
+        오류 메시지에는 설정 값(주소·키가 있을 수 있음)을 넣지 않고 칸 위치·키 이름만 넣는다.
         """
         cls = self.get(kind, name)
         if "meta" in config:
             raise RegistryError(
                 f"{kind} '{name}': 부품 설정에 meta를 넘기지 않습니다(해시 제외 정보)"
             )
+        config_model = getattr(cls, "config_model", None)
+        if config_model is not None:
+            try:
+                validated = config_model.model_validate(dict(config))
+            except ValidationError as exc:
+                where = "; ".join(
+                    f"{'.'.join(str(p) for p in e['loc']) or '(설정)'}: {e['type']}"
+                    for e in exc.errors(
+                        include_input=False, include_url=False, include_context=False
+                    )
+                )
+                raise RegistryError(f"{kind} '{name}' 설정 오류: {where}") from None
+            try:
+                return cls(validated)
+            except Exception as exc:
+                raise RegistryError(
+                    f"{kind} '{name}'을(를) 만들지 못했습니다({type(exc).__name__})"
+                ) from None
         try:
             return cls(**config)
         except Exception as exc:
@@ -311,7 +335,9 @@ class Registry:
                 "(레지스트리가 붙임)"
             )
         allow: Iterable[str] = getattr(cls, "fingerprint_allow", frozenset())
-        return {"type": name, "version": cls.version, **check_fingerprint(fp, allow)}  # type: ignore[attr-defined]
+        # None인 칸은 모든 부품에서 뺀다(새 선택 칸을 더해도 해시가 그대로, 설계 §5).
+        checked = drop_none(check_fingerprint(fp, allow))
+        return {"type": name, "version": cls.version, **checked}  # type: ignore[attr-defined]
 
 
 _default: Registry | None = None

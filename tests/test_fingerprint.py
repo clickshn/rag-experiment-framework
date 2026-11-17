@@ -148,3 +148,51 @@ def test_non_model_path_keeps_generic_message() -> None:
     with pytest.raises(FingerprintError, match="내용 해시") as info:
         check_fingerprint({"snapshot": "/home/user/law"})
     assert "served-model-name" not in str(info.value)
+
+
+# --- 비밀값 꼴(구성 원문·값 검사에 쓰임) ------------------------------------------------
+# 시험 값은 저장소 비밀값 검사(gitleaks)에 걸리지 않도록 실행할 때 이어 붙여 만든다.
+# 엔트로피가 낮은 반복 문자만 쓴다. 실제 키가 아니다.
+
+SECRET_SAMPLES: dict[str, str] = {
+    "Bearer": "Bearer " + "abcdefgh" + "12345678",
+    "sk-": "sk" + "-" + "a" * 20,
+    "hf_": "hf" + "_" + "a" * 24,
+    "ghp_": "gh" + "p_" + "a" * 36,
+    "github_pat_": "github" + "_pat_" + "a" * 30,
+    "AKIA": "AK" + "IA" + "Q" * 16,
+    "AIza": "AI" + "za" + "a" * 35,
+}
+
+
+@pytest.mark.parametrize("name", list(SECRET_SAMPLES))
+def test_secret_patterns_detected(name: str) -> None:
+    from ragexp.fingerprint import has_secret_pattern
+
+    sample = SECRET_SAMPLES[name]
+    assert has_secret_pattern(sample)
+    assert has_secret_pattern(f"# 예전 키 {sample} 지움")  # 문장 속에서도
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Bearer short",  # 너무 짧음
+        "sk-short",
+        "ghp_" + "a" * 10,  # 길이 모자람
+        "AKIA" + "q" * 16,  # 소문자는 AWS 키 꼴 아님
+        "task-runner-config",  # sk-가 단어 중간
+        "model: qwen3:32b",
+    ],
+)
+def test_secret_patterns_not_overmatched(text: str) -> None:
+    from ragexp.fingerprint import has_secret_pattern
+
+    assert not has_secret_pattern(text)
+
+
+def test_secret_pattern_list_is_closed() -> None:
+    """패턴 목록은 확정이다. 늘리려면 실제 사례를 남기고 이 시험을 함께 고친다(design.md)."""
+    from ragexp.fingerprint import SECRET_PATTERNS
+
+    assert len(SECRET_PATTERNS) == 7

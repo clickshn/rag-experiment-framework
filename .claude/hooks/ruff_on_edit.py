@@ -28,8 +28,10 @@ def decide(payload: dict[str, Any]) -> tuple[int, str]:
     path = str((payload.get("tool_input") or {}).get("file_path") or "")
     if not path.endswith(".py") or not Path(path).is_file():
         return 0, ""
-    # 고칠 수 있는 것을 먼저 고치고(안 쓰는 import 제거 등) 포맷한 뒤, 남은 문제를 확인한다.
-    ruff("check", "--fix", "--quiet", path)
+    # 고칠 수 있는 것을 먼저 고치고 포맷한 뒤, 남은 문제를 확인한다.
+    # 안 쓰는 import(F401)는 지우지 않고 알리기만 한다. 여러 번에 나눠 고치는 중간에
+    # 아직 쓰기 전인 import가 사라지는 것을 막는다.
+    ruff("check", "--fix", "--unfixable", "F401", "--quiet", path)
     ruff("format", "--quiet", path)
     check = ruff("check", "--quiet", path)
     if check.returncode != 0:
