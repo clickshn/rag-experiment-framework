@@ -14,6 +14,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
+    "pydantic>=2.14.3",
     "typer>=0.29.1",
 ]
 
@@ -43,7 +44,14 @@ markers = ["network: 실제 네트워크가 필요한 시험(기본 제외)"]
 
 [tool.mypy]
 strict = true
-files = ["src"]
+files = ["src", "tests"]
+# 훅 스크립트는 sys.path로 불러와 시험하므로 같은 경로를 알려 준다.
+mypy_path = [".claude/hooks"]
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
 
 [dependency-groups]
 dev = [

@@ -136,7 +136,7 @@ def test_non_commit_passes_without_gitleaks() -> None:
 
 
 def test_commit_blocked_when_gitleaks_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gitleaks_before_commit.shutil, "which", lambda _: None)
+    monkeypatch.setattr("gitleaks_before_commit.shutil.which", lambda _: None)
     code, msg = gitleaks_before_commit.decide({"tool_input": {"command": "git commit"}})
     assert code == 2
     assert "gitleaks" in msg

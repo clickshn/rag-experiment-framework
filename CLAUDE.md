@@ -13,6 +13,8 @@ RAG 부품을 바꿔 끼우며 다시 만들 수 있고 공정하게 비교하�
 
 단위 하나는 **메모 → 승인 → 구현 → 시험 → 보고 → 커밋** 순서로 진행한다.
 
+**브랜치·병합:** 단위마다 `u<n>-<이름>` 브랜치 → PR → CI 통과 → **squash 병합**(제목 `U<n>: <요약> (#PR번호)`), 병합 뒤 브랜치 삭제. main에 직접 커밋하지 않는다.
+
 1. **메모**: `/unit-plan <n>`으로 `docs/units/U<n>.md`를 쓴다. 칸은 목표·만들 것·파일·완료 기준·시험 목록·설계와 다른 점·결정 필요다. design-reviewer 에이전트의 검토를 받는다.
 2. **승인**: 메모를 사람에게 보여 주고 **멈춘다**. 승인 전에는 구현하지 않는다.
 3. **구현·시험**: 메모 범위만 만든다. 범위를 넘는 일은 메모에 "남은 일"로 적는다.
@@ -38,7 +40,7 @@ uv sync                              # 의존성 설치
 uv run pytest                        # 시험(GPU·네트워크 없이)
 uv run ruff check --fix              # 린트
 uv run ruff format                   # 포맷
-uv run mypy                          # 타입 검사(strict, src)
+uv run mypy                          # 타입 검사(strict, src·tests)
 uv run pre-commit run --all-files    # 커밋 전 검사 전체(gitleaks 포함)
 uv run ragexp --help                 # CLI
 ```
