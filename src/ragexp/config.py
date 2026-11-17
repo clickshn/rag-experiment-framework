@@ -21,9 +21,20 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import Annotated, Any, Literal, get_args
+from urllib.parse import urlsplit
 
+import httpx
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    SecretStr,
+    ValidationError,
+    field_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from ragexp.fingerprint import FingerprintError, has_address, has_secret_pattern, normalize_name
 from ragexp.registry import ComponentKind, Registry, RegistryError
@@ -70,7 +81,8 @@ _PAIR_RE = re.compile(r"([A-Za-z0-9_-]+)\s*[:=]\s*(\S+)")
 # 키처럼 생긴 값: 영문·숫자·기호 8자 이상, 숫자나 -·_가 섞임(예: sk-live-abc, abcd1234efgh).
 _TOKEN_LIKE_RE = re.compile(r"^(?=.*[0-9_-])[A-Za-z0-9._~+/=-]{8,}$")
 _ARM_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-_UNSET = "__ragexp_unset__"
+UNSET_PLACEHOLDER = "__ragexp_unset__"
+"""`--no-env`로 읽을 때 빈 접속 칸에 넣는 자리표시 값. 모델 클라이언트는 이 값이면 만들지 않는다."""
 
 RESERVED_KEYS = frozenset({"type", "meta", "run", "id", "role", "prompt_template"})
 """부품 항목의 예약 칸(부품 설정으로 넘기지 않음). generator의 `prompt`는 R4까지 따로 막는다."""
@@ -225,14 +237,81 @@ class ModelMeta(_Strict):
     end_of_life: Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None = None
 
 
+RESERVED_PARAMS = frozenset({"model", "messages", "stream", "response_format"})
+"""`params`에 쓸 수 없는 키. 클라이언트가 채우거나(model·messages), 쓰지 않거나(stream),
+문항 데이터에서만 받는(response_format) 값이다(U3)."""
+
+
+def normalize_base_url(value: str) -> str:
+    """`base_url`을 검사하고 끝의 `/` 하나를 뗀다. `/v1`까지 포함한 주소로 받는다.
+
+    틀리면 ValueError를 낸다. 메시지에는 이유만 넣고 값은 넣지 않는다.
+    """
+    if any(c.isspace() for c in value):
+        raise ValueError("공백이 있습니다")
+    if "?" in value or "#" in value:
+        raise ValueError("쿼리(?)·조각(#)은 쓰지 않습니다")
+    # urlsplit보다 엄격한 httpx 해석(IPv4 범위·IDNA 등)도 통과해야 한다. 아니면 첫 호출에서
+    # httpx.InvalidURL(메시지에 호스트 값)이 난다.
+    # except 안에서 다시 내지 않는다(원래 예외가 __context__로 이어지지 않게).
+    readable = True
+    try:
+        parts = urlsplit(value)
+        _ = parts.port  # 포트가 숫자가 아니면 여기서 ValueError
+        httpx.URL(value)
+    except (ValueError, httpx.InvalidURL):
+        readable = False
+    if not readable:
+        raise ValueError("주소로 읽을 수 없습니다")
+    if parts.scheme not in ("http", "https"):
+        raise ValueError("스킴은 http·https만 씁니다")
+    if "@" in parts.netloc:
+        raise ValueError("주소 안에 계정(user:pw@)을 넣지 않습니다. 키는 api_key 칸에 씁니다")
+    if not parts.hostname:
+        raise ValueError("호스트가 없습니다")
+    return value[:-1] if value.endswith("/") else value
+
+
 class ModelSettings(_Strict):
-    """생성·판정 모델 설정의 공통 바탕. U3·U7이 상속해 부품의 config_model로 쓴다."""
+    """생성·판정 모델 설정의 공통 바탕. U3·U7이 상속해 부품의 config_model로 쓴다.
+
+    `run`은 로더가 YAML의 `run`(없으면 기본값)으로 넣어 준다(해시 밖).
+    검증 오류 문구에는 입력값을 넣지 않는다(`hide_input_in_errors`, 주소가 새지 않게).
+    """
+
+    model_config = ConfigDict(hide_input_in_errors=True)
 
     model: NonEmpty
     revision: NonEmpty | None = None
     params: dict[str, JsonValue] = Field(default_factory=dict)
     base_url: SecretStr
     api_key: SecretStr | None = None
+    run: RunSettings = Field(default_factory=RunSettings)
+
+    @field_validator("base_url")
+    @classmethod
+    def _check_base_url(cls, value: SecretStr) -> SecretStr:
+        raw = value.get_secret_value()
+        if raw == UNSET_PLACEHOLDER:  # --no-env: 해시만 낸다. 클라이언트가 만들 때 거부한다
+            return value
+        try:
+            return SecretStr(normalize_base_url(raw))
+        except ValueError as exc:
+            raise PydanticCustomError(
+                "base_url_format", "base_url 형식 오류: {reason}", {"reason": str(exc)}
+            ) from None
+
+    @field_validator("params")
+    @classmethod
+    def _no_reserved_params(cls, value: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        bad = sorted(RESERVED_PARAMS & set(value))
+        if bad:
+            raise PydanticCustomError(
+                "params_reserved_key",
+                "params에 쓸 수 없는 키입니다({keys})",
+                {"keys": ", ".join(bad)},
+            )
+        return value
 
     def fingerprint_items(self) -> dict[str, Any]:
         """fingerprint에 넣을 값: model·revision·params(None은 뺌). 접속 칸은 넣지 않는다."""
@@ -441,7 +520,7 @@ def _substitute(obj: Any, env: Mapping[str, str], allow_missing: bool, missing: 
             value = env.get(m.group(1), "")
             if not value:
                 missing.add(m.group(1))
-                return _UNSET if allow_missing else ""
+                return UNSET_PLACEHOLDER if allow_missing else ""
             return value
     return obj
 
@@ -618,6 +697,10 @@ def load_config(
     # 9. 부품 생성
     def create(spec: _Spec, extra_settings: dict[str, Any] | None = None) -> Any:
         settings = {**resolved[id(spec)], **(extra_settings or {})}
+        # config_model에 run 칸이 있는 부품(ModelSettings 상속)에만 실행 설정을 넣는다(해시 밖).
+        model = getattr(classes[id(spec)], "config_model", None)
+        if spec.run is not None and "run" in getattr(model, "model_fields", {}):
+            settings["run"] = spec.run
         try:
             return registry.create(spec.kind, spec.type, settings)
         except RegistryError as exc:
@@ -682,6 +765,8 @@ __all__ = [
     "CONNECTION_FIELDS",
     "CONNECTION_PREFIXES",
     "CONNECTION_SUFFIXES",
+    "RESERVED_PARAMS",
+    "UNSET_PLACEHOLDER",
     "ArmConfig",
     "ConfigError",
     "GeneratorSettings",
@@ -694,6 +779,7 @@ __all__ = [
     "TopRunSettings",
     "is_connection_field",
     "load_config",
+    "normalize_base_url",
     "parse_yaml",
     "scan_raw_text",
 ]

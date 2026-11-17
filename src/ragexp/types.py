@@ -109,7 +109,10 @@ NonEmptyStr = Annotated[str, Field(min_length=1)]
 NoUrlStr = Annotated[str, AfterValidator(_no_url)]
 
 FinishReason = Literal["stop", "length", "error", "other"]
-ErrorKind = Literal["connect", "timeout", "http_status", "parse", "other"]
+ErrorKind = Literal[
+    "connect", "timeout", "http_status", "client_error", "config_error", "parse", "other"
+]
+"""모델 호출 실패 종류. 서버 사정·모델·문항 사정·설정 오류 분류는 `client.failure_class`."""
 VerdictStatus = Literal["ok", "truncated", "error", "not_applicable"]
 Split = Literal["dev", "val", "test"]
 
@@ -191,22 +194,40 @@ class Hit(Frozen):
 
 
 class Usage(Frozen):
-    """모델 호출 한 번의 비용 재료. 서버가 토큰 수를 주지 않으면 None(0과 구분)."""
+    """모델 호출 한 번의 비용 재료. 서버가 토큰 수를 주지 않으면 None(0과 구분).
+
+    `latency_ms`는 마지막 시도 한 번의 시간, `total_ms`는 재시도·대기를 포함한 전체 시간이다
+    (U3). `total_ms`는 예전 기록과 맞추려고 선택 칸이다.
+    """
 
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     latency_ms: float = Field(ge=0)
+    total_ms: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _total_covers_latency(self) -> Self:
+        if self.total_ms is not None and self.total_ms < self.latency_ms:
+            raise ValueError(
+                "total_ms는 latency_ms보다 작을 수 없습니다(재시도·대기를 포함한 시간)"
+            )
+        return self
 
 
 class Answer(Frozen):
-    """생성기 출력. `served_model`은 응답에 실제로 찍힌 모델 이름이다."""
+    """생성기 출력. `served_model`은 응답에 실제로 찍힌 모델 이름이다.
+
+    `attempts`는 호출 안 시도 횟수, `warnings`는 클라이언트 경고(모델 이름 불일치 등)다.
+    """
 
     text: str
     finish_reason: FinishReason
     usage: Usage
-    served_model: str | None = None
+    served_model: NoUrlStr | None = None
     error_kind: ErrorKind | None = None
     error: NoUrlStr = ""
+    attempts: int = Field(default=1, ge=1)
+    warnings: tuple[NoUrlStr, ...] = ()
 
     @model_validator(mode="after")
     def _error_consistent(self) -> Self:

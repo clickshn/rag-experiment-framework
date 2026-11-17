@@ -483,3 +483,102 @@ def test_non_utf8_config(tmp_path: Path, fake_registry: Registry) -> None:
 def test_exponent_without_dot_is_float() -> None:
     """지적 17: YAML 1.1은 1e-3을 문자열로 읽는다. 1.2처럼 float로 읽는다."""
     assert parse_yaml("t: 1e-3\nu: -2E+2\nv: 1.0e-3\n") == {"t": 0.001, "u": -200.0, "v": 0.001}
+
+
+# --- U3: base_url 형식·run 주입·params 예약 키 -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "localhost:8000/v1",
+        "ftp://gpu-box/v1",
+        "http://user:pw@gpu-box/v1",
+        "http://gpu-box/v1?debug=1",
+        "http://gpu-box/v1#frag",
+        "http:///v1",
+        "http://gpu-box:port/v1",
+        "http://gpu box/v1",
+        "http://10.0.0.256:8000/v1",
+    ],
+    ids=[
+        "스킴 없음",
+        "ftp",
+        "계정",
+        "쿼리",
+        "조각",
+        "호스트 없음",
+        "포트 글자",
+        "공백",
+        "IPv4 범위",
+    ],
+)
+def test_base_url_format_rejected(bad: str, tmp_path: Path, fake_registry: Registry) -> None:
+    msg = errors_of(tmp_path, fake_registry, BASE_TEXT, env={**ENV, "GEN_A_URL": bad})
+    assert "generators.A" in msg and "base_url_format" in msg
+    assert bad not in msg and "gpu-box" not in msg
+
+
+def test_base_url_trailing_slash_normalized(tmp_path: Path, fake_registry: Registry) -> None:
+    env = {**ENV, "GEN_A_URL": "http://localhost:1/v1/"}
+    loaded = load_config(write(tmp_path, BASE_TEXT), fake_registry, env=env)
+    assert loaded.arms["A"].generator.cfg.base_url.get_secret_value() == "http://localhost:1/v1"
+
+
+def test_model_settings_error_hides_input() -> None:
+    """레지스트리를 거치지 않고 직접 만들어도 검증 오류 문구에 값이 없다."""
+    from pydantic import ValidationError
+
+    from ragexp.config import ModelSettings
+
+    with pytest.raises(ValidationError) as info:
+        ModelSettings.model_validate({"model": "m", "base_url": "ftp://gpu-box:8000/v1"})
+    assert "base_url_format" in str(info.value) and "gpu-box" not in str(info.value)
+
+
+def test_no_env_builds_components_but_client_refuses(
+    tmp_path: Path, fake_registry: Registry
+) -> None:
+    """--no-env: 부품을 만들고 해시를 내지만, 모델 클라이언트는 자리표시 값을 거부한다."""
+    from ragexp.client import ChatClient, ClientConfigError
+    from ragexp.config import UNSET_PLACEHOLDER
+
+    loaded = load_config(write(tmp_path, BASE_TEXT), fake_registry, env={}, allow_missing_env=True)
+    cfg = loaded.arms["A"].generator.cfg
+    assert cfg.base_url.get_secret_value() == UNSET_PLACEHOLDER
+    with pytest.raises(ClientConfigError, match="base_url"):
+        ChatClient(cfg)
+
+
+def test_run_is_injected_into_model_settings(tmp_path: Path, fake_registry: Registry) -> None:
+    data = mutate(lambda d: d["judges"][1].update(run={"timeout_s": 30, "max_retries": 0}))
+    loaded = load_config(write(tmp_path, data), fake_registry, env=ENV)
+    assert loaded.arms["A"].generator.cfg.run.concurrency == 8  # YAML run
+    assert loaded.arms["A"].generator.cfg.run == loaded.arms["A"].run
+    assert loaded.arms["B"].generator.cfg.run.timeout_s == 180  # 기본값
+    judge = loaded.judges[1].component.cfg
+    assert judge.run.timeout_s == 30 and judge.run.max_retries == 0
+
+
+def test_run_is_not_in_fingerprint(tmp_path: Path, fake_registry: Registry) -> None:
+    loaded = load_config(write(tmp_path, BASE_TEXT), fake_registry, env=ENV)
+    fp = fake_registry.component_fingerprint(loaded.arms["A"].generator)
+    assert "run" not in fp and "concurrency" not in str(fp)
+
+
+@pytest.mark.parametrize("key", ["model", "messages", "stream", "response_format"])
+def test_params_reserved_keys(key: str, tmp_path: Path, fake_registry: Registry) -> None:
+    data = mutate(lambda d: d["generators"]["A"]["params"].update({key: True}))
+    msg = errors_of(tmp_path, fake_registry, data)
+    assert "generators.A" in msg and "params_reserved_key" in msg
+
+
+def test_run_not_injected_without_run_field(tmp_path: Path, fake_registry: Registry) -> None:
+    """run 칸이 없는 config_model(extra 금지)과 config_model이 없는 부품에는 넣지 않는다."""
+    data = mutate(lambda d: d["judges"][2].update(type="fake_llm_norun", run={"timeout_s": 5}))
+    data["judges"][2].pop("base_url")
+    loaded = load_config(write(tmp_path, data), fake_registry, env=ENV)
+    judge = loaded.judges[2].component
+    assert judge.cfg.model_dump() == {"model": "judge-y"}  # run이 넘어오지 않았다
+    assert loaded.judges[2].run.timeout_s == 5  # 실행 설정은 JudgeConfig.run으로만 간다
+    assert loaded.judges[0].component.received == {}  # config_model 없는 코드 규칙 판정

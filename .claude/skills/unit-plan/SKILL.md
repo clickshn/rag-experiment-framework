@@ -10,6 +10,7 @@ disable-model-invocation: true
 단위 **U$ARGUMENTS**의 설계 메모를 쓴다. **이 명령으로는 코드를 쓰지 않는다.**
 
 ## 1. 읽기
+- `docs/STATUS.md`의 "남은 일 모음"에서 이 단위로 넘어온 항목(메모의 첫 항목들로 다룬다)
 - `docs/units/R0.md`(또는 현재 단계 계획)에서 U$ARGUMENTS 행과 "정해 둔 방향"
 - `docs/design.md`에서 이 단위와 관련된 절. 특히 §2 원칙, §5 버전, §8 저장
 - 앞 단위 메모(`docs/units/U*.md`)의 "결과"와 "남은 일"
