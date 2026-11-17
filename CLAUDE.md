@@ -1,3 +1,5 @@
+**모든 응답·보고는 한국어로 쓴다.** 도구 결과나 원문이 영어여도, 사람에게 하는 답변·진행 보고·최종 보고는 한국어로 쓴다.
+
 # CLAUDE.md
 
 RAG 부품을 바꿔 끼우며 다시 만들 수 있고 공정하게 비교하는 실험 프레임워크다. 배포명은 `rag-experiment-framework`, import·CLI 이름은 `ragexp`다.
@@ -16,7 +18,7 @@ RAG 부품을 바꿔 끼우며 다시 만들 수 있고 공정하게 비교하�
 3. **구현·시험**: 메모 범위만 만든다. 범위를 넘는 일은 메모에 "남은 일"로 적는다.
 4. **검사**: `/unit-check`를 돌린다.
 5. **보고**: `/unit-report`로 메모에 "결과" 절(완료 기준별 통과와 근거)을 쓴다.
-6. **커밋**: 단위 브랜치(`u<n>-…`)에 커밋한다.
+6. **커밋**: 단위 브랜치(`u<n>-…`)에 커밋한다. `git add`로 먼저 올린 뒤 커밋하고, `git commit -a`/`--all`은 쓰지 않는다(훅이 막음. staged 비밀값 검사가 보지 못하는 변경이 생김).
 7. **push·PR**: **반드시 사람에게 먼저 묻는다.** force push는 하지 않는다.
 
 - 새 런타임 의존성은 묻고 추가하며, 이유를 ADR(`docs/adr/`)로 남긴다.
@@ -60,7 +62,7 @@ uv run ragexp --help                 # CLI
 
 - `.claude/settings.json`: 권한 목록과 훅 세 개
   - `.env` 접근 차단
-  - 커밋 전 gitleaks
+  - 커밋 전 gitleaks(`-a`/`--all` 커밋 거부)
   - .py를 고치면 ruff
 - `.claude/skills/`: 명령 `/unit-plan`, `/unit-check`, `/unit-report`
 - `.claude/agents/design-reviewer.md`: 설계 원칙 대조 검토(읽기 전용)

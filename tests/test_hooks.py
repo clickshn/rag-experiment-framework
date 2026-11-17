@@ -79,6 +79,58 @@ def test_non_commit_ignored(command: str) -> None:
     assert not gitleaks_before_commit.is_commit(command)
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git commit -a -m x",
+        "git commit -am 'x'",
+        "git commit --all -m x",
+        "git commit -vam x",
+        "git commit -m x -a",
+        "git commit --amend --all --no-edit",
+        "git add docs && git commit -am 'x'",
+        "git -c user.name=a commit -a",
+        "git status; git commit --all",
+        "git commit -S -a -m x",
+    ],
+)
+def test_commit_all_rejected(command: str) -> None:
+    assert gitleaks_before_commit.uses_commit_all(command)
+    code, msg = gitleaks_before_commit.decide({"tool_input": {"command": command}})
+    assert code == 2
+    assert "git add" in msg
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git commit -m x",
+        "git commit -m '-a 옵션 설명'",  # 메시지 안의 -a
+        "git commit -m -a",  # -m의 값
+        "git commit -ma",  # 메시지가 'a'
+        "git commit --message --all",  # --message의 값
+        "git commit -F - <<'EOF'\n-a 로 시작하는 본문 줄\n--all\nEOF",  # heredoc 본문
+        "git commit -m x > log.txt -a",  # 리다이렉션 뒤는 commit 인자가 아님
+        "git commit -m x && echo -a",
+        "git commit --amend --no-edit",
+        "git commit -- -a",  # -- 뒤는 경로
+        "git add -A && git commit -F -",
+        "git status -a",
+    ],
+)
+def test_commit_without_all_allowed(command: str) -> None:
+    assert not gitleaks_before_commit.uses_commit_all(command)
+
+
+def test_commit_all_hook_process(tmp_path: Path) -> None:
+    proc = run_hook(
+        "gitleaks_before_commit.py",
+        {"tool_input": {"command": "git commit -am x"}, "cwd": str(tmp_path)},
+    )
+    assert proc.returncode == 2
+    assert "git add" in proc.stderr.decode("utf-8")
+
+
 def test_non_commit_passes_without_gitleaks() -> None:
     assert gitleaks_before_commit.decide({"tool_input": {"command": "git status"}}) == (0, "")
 
