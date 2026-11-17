@@ -51,11 +51,12 @@ jobs:
           fetch-depth: 0
       - name: gitleaks 설치
         run: |
-          curl -sSfL -o gitleaks.tar.gz \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -sSfL -o checksums.txt \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-          grep "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" checksums.txt | sha256sum -c -
-          tar -xzf gitleaks.tar.gz gitleaks
+          # 체크섬 목록이 원래 파일 이름으로 적혀 있으므로 이름을 바꾸지 않고 받는다.
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "${tarball}" "${base}/${tarball}"
+          curl -sSfL -o checksums.txt "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " ${tarball}\$" checksums.txt | sha256sum -c -
+          tar -xzf "${tarball}" gitleaks
       - name: 전체 이력 비밀값 검사
         run: ./gitleaks git --redact --no-banner --verbose .
