@@ -128,3 +128,23 @@ def test_normalizes_tuples_and_mappings_only() -> None:
 def test_not_a_mapping() -> None:
     with pytest.raises(FingerprintError):
         check_fingerprint(["model"])  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "fp",
+    [
+        {"model": "/models/Qwen3.5-27B-FP8"},
+        {"params": {"judge_model": "C:\models\gemma"}},
+        {"model_name": "~/models/kure"},
+    ],
+)
+def test_path_like_model_name_explains_fix(fp: dict[str, Any]) -> None:
+    with pytest.raises(FingerprintError, match="--served-model-name") as info:
+        check_fingerprint(fp)
+    assert "PC마다 달라 구성 버전에 넣지 않습니다" in str(info.value)
+
+
+def test_non_model_path_keeps_generic_message() -> None:
+    with pytest.raises(FingerprintError, match="내용 해시") as info:
+        check_fingerprint({"snapshot": "/home/user/law"})
+    assert "served-model-name" not in str(info.value)

@@ -91,6 +91,12 @@ def has_address(value: str) -> bool:
     return "://" in value or bool(_IPV4_RE.search(value) or _HOST_PORT_RE.match(value))
 
 
+def _is_model_key(path: str) -> bool:
+    """경로의 마지막 키가 모델 이름 칸(model, judge_model, model_name 등)인지 본다."""
+    last = normalize_name(path.rsplit(".", 1)[-1].split("[", 1)[0])
+    return last == "model" or last.endswith("_model") or last == "model_name"
+
+
 def _bad_string(value: str) -> str | None:
     """문자열 값이 금지 대상이면 이유를, 아니면 None을 돌려준다."""
     if has_address(value):
@@ -127,6 +133,12 @@ def _check(value: Any, path: str, allow: frozenset[str]) -> Any:
     if isinstance(value, str):
         reason = _bad_string(value)
         if reason:
+            if "경로" in reason and _is_model_key(path):
+                raise FingerprintError(
+                    f"{path}: 모델 이름이 경로입니다({reason}). "
+                    "vLLM은 --served-model-name으로 이름을 정하세요. "
+                    "모델 경로는 PC마다 달라 구성 버전에 넣지 않습니다"
+                )
             raise FingerprintError(
                 f"{path}: 값에 {reason}이(가) 들어 있습니다. "
                 "주소·경로는 해시에 넣지 않습니다(스냅샷·파일은 내용 해시로)"
