@@ -112,34 +112,44 @@ P0에서 검증한 것과 P0에서 실제로 문제가 됐던 것을 기본 동�
 
 **모델 메타 정보**: Generator·Embedder·Reranker·Judge는 설정에 모델 선택에 필요한 정보를 함께 적는다. 가격(상용은 입력·출력 토큰 단가, 로컬은 GPU 시간당 비용), 필요한 GPU 메모리, 라이선스, 폐쇄망 반입 가능 여부, 상용 모델 종료 예정일. 이 정보는 구성 해시에 넣지 않고(가격이 바뀌어도 같은 실험), 비교 화면과 비용 계산에만 쓴다.
 
-### 인터페이스 예시 (설계안)
+### 인터페이스 (U1에서 확정)
+
+도메인 타입은 pydantic `BaseModel(frozen=True)`이다. 같은 정의로 바깥 입력(문항 파일 등)을 검증하고, 실행 기록 JSON으로 왕복한다. 모든 부품은 클래스 속성 `version`(필수, 동작이 바뀌면 올림)과 `fingerprint()`를 갖는다. 구현은 `src/ragexp/components/protocols.py`에 있다.
 
 ```python
-from typing import Protocol
-
 class Embedder(Protocol):
-    def embed(self, texts: list[str]) -> list[list[float]]: ...
-    def fingerprint(self) -> dict: ...   # 모델·revision·차원 → 구성 해시에 들어감
+    version: ClassVar[str]
+    def embed(self, texts: Sequence[str], *, kind: Literal["query", "document"]) -> list[list[float]]: ...
+    def dimension(self) -> int: ...
+    def fingerprint(self) -> Fingerprint: ...   # 모델·revision·차원 → 구성 해시에 들어감
 
 class Retriever(Protocol):
-    def retrieve(self, query: str, k: int) -> list["Hit"]: ...
-    def fingerprint(self) -> dict: ...
+    def retrieve(self, query: RetrievalQuery) -> list[Hit]: ...   # k는 설정값
 
 class Generator(Protocol):
-    def generate(self, question: str, context: list["Chunk"]) -> "Answer": ...
-    def fingerprint(self) -> dict: ...
+    def generate(self, inp: GenerationInput, context: Sequence[Chunk]) -> Answer: ...
 
 class Judge(Protocol):
-    def judge(self, item: "Item", answer: "Answer") -> "Verdict": ...
-    def fingerprint(self) -> dict: ...
+    def judge(self, question: JudgeQuestion, response: JudgeInput) -> Verdict: ...
 ```
 
-등록은 데코레이터 하나로 한다. 밖에서 만든 부품도 패키지 entry point로 등록해 프레임워크를 고치지 않고 쓸 수 있다.
+도메인 타입은 `Document`(+`Section`), `Chunk`, `Hit`, `Question`, `Usage`, `Answer`, `Verdict` 7개다. 설계 원칙 몇 가지는 보조 타입으로 강제한다.
 
-```python
-@register("retriever", "hybrid")
-class HybridRetriever: ...
+| 원칙 | 타입으로 막는 방법 |
+| --- | --- |
+| 정답 정보는 oracle 검색만 본다 | 검색 입력 `RetrievalQuery.gold`는 정답 근거가 필요한 검색기(`needs_gold`)에만, 생성만 수준에서만 채운다. 생성 입력 `GenerationInput`에는 gold·must·fail 칸이 없다. |
+| 판정은 블라인드 | 판정 입력 `JudgeQuestion`(qid·split·provenance 없음), `JudgeInput`(모델 이름·usage 없음) |
+| 정오는 코드가 계산 | 판정 출력 `Verdict`에 정오 칸이 없고, 지표 이름으로도 정오(`correct`·`accuracy` 등)를 낼 수 없다. must·fail 참·거짓만 내고 정오는 채점 코드가 계산한다. |
+| 주소를 기록에 남기지 않음 | `Answer.error`·`Verdict.note`에 주소(URL·IPv4·호스트:포트)가 있으면 생성 시 오류. `model_copy(update=)`도 다시 검증한다. |
+
+**등록과 외부 부품**: `@register(kind, name)`은 클래스에 표시만 붙이고, 등록은 레지스트리가 한다. 밖에서 만든 부품은 entry point 그룹 `ragexp.components`에 **`<kind>.<name>` 이름**으로 선언한다.
+
+```toml
+[project.entry-points."ragexp.components"]
+"retriever.hybrid" = "my_pkg.retrievers:HybridRetriever"
 ```
+
+이름만 보고도 어떤 부품이 있는지 알 수 있어서, 실제로 쓰는 부품만 그때 불러온다. 쓰는 부품을 불러오지 못하면 플러그인 이름을 담아 실행 전에 멈춘다. 쓰지 않는 플러그인의 문제는 경고만 낸다. 내장 부품도 같은 방식으로 등록한다.
 
 ### 모델 호출 통로
 
@@ -188,6 +198,18 @@ level: full   # retrieval_only(검색만) | generation_only(정답 근거 주입
 | 구성 버전 | 말뭉치 스냅샷 해시, 청킹·임베딩·검색·리랭크·생성 설정과 fingerprint, 프롬프트 파일 내용 | 다른 실험 |
 | 채점 버전 | 판정 모델·프롬프트·디코딩, 규칙 코드 버전, 점검 문항, 합격선 | 점수를 서로 비교할 수 없음 |
 | 문항 세트 버전 | 문항 파일 내용 해시 | 다른 시험 |
+
+**fingerprint에 넣는 것과 빼는 것** (부품이 내놓고, 레지스트리가 `type`·`version`을 붙인다. 판정 부품은 채점 버전으로, 나머지는 구성 버전으로 간다.)
+
+| 넣는다 (바뀌면 다른 실험) | 뺀다 (바뀌어도 같은 실험) |
+| --- | --- |
+| 등록 이름, 구현 `version` | 서버 주소, API 키·토큰, `${VAR}` |
+| 모델 이름·revision·임베딩 차원 | 시간 제한, 재시도, 동시 처리 수 |
+| 출력에 영향 주는 파라미터(temperature, max_tokens, seed, k, top_n, 청크 길이, 근거 상한 등) | 모델 meta(가격, GPU 메모리, 라이선스, 폐쇄망 반입, 종료 예정일, deploy) |
+| 프롬프트·판정 템플릿 **내용**의 해시 | 절대 로컬 경로(드라이브 문자·`/home/`·`/Users/` 등) |
+| 말뭉치 스냅샷의 **내용** 해시(경로가 아님) | |
+
+`check_fingerprint`가 금지 이름과 금지 값을 검사해 멈춘다. 이름은 대소문자·하이픈을 무시하고 중첩까지 본다. 금지 값은 URL, IPv4, 호스트:포트, `${`, 절대 로컬 경로, NaN이다. 끝말·접두어 규칙(`*_key`, `price*` 등)에 걸리는 정상 파라미터는 부품이 `fingerprint_allow`로 선언해 풀 수 있다. 정확한 금지 이름(`api_key`, `base_url`, `meta`, `oc` 등)은 풀 수 없다.
 
 - 비밀값(`${...}`)과 주소는 해시에 넣지 않는다. 같은 모델을 다른 서버에서 돌려도 같은 구성으로 본다. 대신 응답의 실제 모델 이름을 기록해 다르면 경고한다.
 - 값이 하나라도 비어 있거나 알 수 없는 이름이면 실행 전에 멈춘다.
@@ -375,7 +397,9 @@ workspace/
 rag-experiment-framework/
 ├─ src/ragexp/
 │  ├─ components/      # corpus, chunker, embedder, vector_store, retriever, reranker, generator, judge
-│  ├─ registry.py      # 부품 등록·생성
+│  ├─ types.py         # 도메인 타입(pydantic, 불변)
+│  ├─ fingerprint.py   # fingerprint 검사(주소·비밀값·meta·경로 금지)
+│  ├─ registry.py      # 부품 등록·생성, entry point
 │  ├─ config.py        # YAML → Pydantic, 변형 펼치기
 │  ├─ versioning.py    # 구성·채점·문항 세트 해시
 │  ├─ client.py        # 모델 호출 통로(재시도·기록·잘림)

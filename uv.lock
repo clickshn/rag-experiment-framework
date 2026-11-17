@@ -600,6 +600,7 @@ name = "rag-experiment-framework"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "pydantic" },
     { name = "typer" },
 ]
 
@@ -612,7 +613,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "typer", specifier = ">=0.29.1" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.14.3" },
+    { name = "typer", specifier = ">=0.29.1" },
+]
 
 [package.metadata.requires-dev]
 dev = [
