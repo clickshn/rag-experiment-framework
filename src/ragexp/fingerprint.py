@@ -96,13 +96,24 @@ def has_address(value: str) -> bool:
 
 
 # 흔한 비밀값 꼴(Bearer 토큰, OpenAI·HF 형식 키). 구성 원문 어디에 있든 거부한다.
-_SECRET_RE = re.compile(
-    r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}|\bsk-[A-Za-z0-9_-]{16,}|\bhf_[A-Za-z0-9]{20,}"
-)
+#
+# 이 목록은 확정이다(2026-11-17). 새 패턴은 **실제로 새는 사례가 나왔을 때만** 더한다.
+# 그 밖의 미탐은 design.md "알려진 남는 위험"에 적고,
+# 두 번째 겹(gitleaks pre-commit·CI 전체 이력 검사)에 맡긴다.
+SECRET_PATTERNS: dict[str, str] = {
+    "Bearer 토큰": r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}",
+    "OpenAI 형식 키(sk-)": r"\bsk-[A-Za-z0-9_-]{16,}",
+    "Hugging Face 토큰(hf_)": r"\bhf_[A-Za-z0-9]{20,}",
+    "GitHub 토큰(ghp_)": r"\bghp_[A-Za-z0-9]{36}",
+    "GitHub 세분 토큰(github_pat_)": r"\bgithub_pat_[A-Za-z0-9_]{22,}",
+    "AWS 액세스 키(AKIA)": r"\bAKIA[0-9A-Z]{16}",
+    "Google API 키(AIza)": r"\bAIza[0-9A-Za-z_-]{35}",
+}
+_SECRET_RE = re.compile("|".join(f"(?:{p})" for p in SECRET_PATTERNS.values()))
 
 
 def has_secret_pattern(value: str) -> bool:
-    """문자열에 흔한 비밀값 꼴(Bearer …, sk-…, hf_…)이 있는지 본다."""
+    """문자열에 흔한 비밀값 꼴(`SECRET_PATTERNS`)이 있는지 본다."""
     return bool(_SECRET_RE.search(value))
 
 

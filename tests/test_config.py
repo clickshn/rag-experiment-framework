@@ -209,6 +209,11 @@ ADDRESS_TEXTS: list[tuple[str, str]] = [
     ("Bearer 토큰", "# Authorization: Bearer abcdefgh12345678\n" + BASE_TEXT),
     ("sk- 키", "# sk-abcdefghijklmnop1234 예전 키\n" + BASE_TEXT),
     ("아포스트로피 뒤 주석", "description: don't  # api_key: sk-live-abc\n" + BASE_TEXT),
+    # 승인 때 더한 비밀값 꼴(gitleaks에 걸리지 않게 실행할 때 이어 붙임)
+    ("GitHub 토큰", "# 예전 토큰 " + "gh" + "p_" + "a" * 36 + "\n" + BASE_TEXT),
+    ("GitHub 세분 토큰", "# " + "github" + "_pat_" + "a" * 30 + "\n" + BASE_TEXT),
+    ("AWS 키", "# " + "AK" + "IA" + "Q" * 16 + "\n" + BASE_TEXT),
+    ("Google API 키", "# " + "AI" + "za" + "a" * 35 + "\n" + BASE_TEXT),
 ]
 
 
