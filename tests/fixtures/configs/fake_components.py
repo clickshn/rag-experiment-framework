@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from typing import Any, ClassVar, Literal
 
-from pydantic import model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from ragexp.config import GeneratorSettings, ModelSettings
 from ragexp.registry import register
@@ -126,6 +126,9 @@ class FakeRulesJudge:
     version: ClassVar[str] = "1"
     judge_kind: ClassVar[str] = "code"
 
+    def __init__(self, **config: Any) -> None:
+        self.received = config  # run 주입 여부 시험용(아무것도 받지 않아야 함)
+
     def judge(self, question: JudgeQuestion, response: JudgeInput) -> Verdict:
         return Verdict(judge_id="x", judge_type="fake_rules", status="ok")
 
@@ -196,6 +199,29 @@ class FakePlainGen:
 
     def fingerprint(self) -> dict[str, Any]:
         return {}
+
+
+class NoRunSettings(BaseModel):
+    """run 칸이 없는 config_model(모르는 칸 거부): run을 주입하면 검증이 실패한다."""
+
+    model_config = ConfigDict(extra="forbid")
+    model: str
+
+
+@register("judge", "fake_llm_norun")
+class FakeLlmNoRun:
+    version: ClassVar[str] = "1"
+    judge_kind: ClassVar[str] = "model"
+    config_model: ClassVar[type] = NoRunSettings
+
+    def __init__(self, cfg: NoRunSettings) -> None:
+        self.cfg = cfg
+
+    def judge(self, question: JudgeQuestion, response: JudgeInput) -> Verdict:
+        return Verdict(judge_id="x", judge_type="fake_llm_norun", status="ok")
+
+    def fingerprint(self) -> dict[str, Any]:
+        return {"model": self.cfg.model}
 
 
 @register("judge", "fake_rules2")

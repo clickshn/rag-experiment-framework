@@ -297,3 +297,43 @@ def test_for_judge_drops_provenance_and_ids() -> None:
 
 def test_retrieval_query_gold_defaults_to_none() -> None:
     assert RetrievalQuery(text="질문").gold is None
+
+
+# --- U3: Answer·Usage 새 칸 -----------------------------------------------------------
+
+
+def test_new_fields_have_defaults_for_old_json() -> None:
+    """칸이 없는 예전 JSON도 읽힌다(attempts=1, warnings=(), total_ms=None)."""
+    old = {"text": "a", "finish_reason": "stop", "usage": {"latency_ms": 5}}
+    a = Answer.from_dict(old)
+    assert a.attempts == 1 and a.warnings == () and a.usage.total_ms is None
+
+
+@pytest.mark.parametrize("kind", ["client_error", "config_error"])
+def test_new_error_kinds(kind: str) -> None:
+    a = answer(text="", finish_reason="error", error_kind=kind, error="HTTP 400")
+    assert Answer.from_dict(a.to_dict()) == a
+
+
+def test_attempts_at_least_one() -> None:
+    with pytest.raises(ValidationError):
+        answer(attempts=0)
+
+
+def test_warnings_reject_addresses() -> None:
+    assert answer(warnings=("응답 모델 이름(x)이 설정(y)과 다릅니다",)).warnings
+    with pytest.raises(ValidationError):
+        answer(warnings=("서버 gpu-01:8000 응답",))
+
+
+def test_total_ms_covers_latency() -> None:
+    assert Usage(latency_ms=10, total_ms=10).total_ms == 10
+    with pytest.raises(ValidationError):
+        Usage(latency_ms=10, total_ms=9)
+    with pytest.raises(ValidationError):
+        Usage(latency_ms=1, total_ms=-1)
+
+
+def test_served_model_rejects_addresses() -> None:
+    with pytest.raises(ValidationError):
+        answer(served_model="http://gpu-01:8000/v1/model-a")

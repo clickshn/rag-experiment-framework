@@ -123,12 +123,8 @@ def _is_model_key(path: str) -> bool:
     return last == "model" or last.endswith("_model") or last == "model_name"
 
 
-def _bad_string(value: str) -> str | None:
-    """문자열 값이 금지 대상이면 이유를, 아니면 None을 돌려준다."""
-    if has_address(value):
-        return "주소"
-    if value.startswith("${"):
-        return "환경 변수 치환 자리(${...})"
+def _path_reason(value: str) -> str | None:
+    """절대 로컬 경로면 그 이유를, 아니면 None을 돌려준다."""
     if _DRIVE_RE.search(value) or value.startswith("\\\\"):
         return "절대 로컬 경로(드라이브·UNC)"
     if (
@@ -138,6 +134,24 @@ def _bad_string(value: str) -> str | None:
     ):
         return "절대 로컬 경로"
     return None
+
+
+def is_absolute_path(value: str) -> bool:
+    """절대 로컬 경로(드라이브 문자, UNC, `~/`, `/이름/…`, 알려진 루트)가 있는지 본다.
+
+    fingerprint 검사와 응답 모델 이름 확인(U3 클라이언트)이 같이 쓴다.
+    `Qwen/Qwen3-8B` 같은 Hugging Face 저장소 ID는 경로가 아니다.
+    """
+    return _path_reason(value) is not None
+
+
+def _bad_string(value: str) -> str | None:
+    """문자열 값이 금지 대상이면 이유를, 아니면 None을 돌려준다."""
+    if has_address(value):
+        return "주소"
+    if value.startswith("${"):
+        return "환경 변수 치환 자리(${...})"
+    return _path_reason(value)
 
 
 def _check(value: Any, path: str, allow: frozenset[str]) -> Any:

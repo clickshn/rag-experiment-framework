@@ -134,7 +134,7 @@ def test_not_a_mapping() -> None:
     "fp",
     [
         {"model": "/models/Qwen3.5-27B-FP8"},
-        {"params": {"judge_model": "C:\models\gemma"}},
+        {"params": {"judge_model": r"C:\models\gemma"}},
         {"model_name": "~/models/kure"},
     ],
 )
@@ -196,3 +196,26 @@ def test_secret_pattern_list_is_closed() -> None:
     from ragexp.fingerprint import SECRET_PATTERNS
 
     assert len(SECRET_PATTERNS) == 7
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("/models/Qwen3-8B", True),
+        ("/home/u/models/X", True),
+        (r"C:\models\X", True),
+        ("d:/models/x", True),
+        (r"\\server\share\m", True),
+        ("~/models/kure", True),
+        ("Qwen/Qwen3-8B", False),
+        ("nlpai-lab/KURE-v1", False),
+        ("org/models/x", False),
+        ("qwen3:32b", False),
+        ("model-a", False),
+    ],
+)
+def test_is_absolute_path(value: str, expected: bool) -> None:
+    """U3: fingerprint 검사와 응답 모델 이름 확인이 같은 경로 규칙을 쓴다. HF ID는 경로가 아니다."""
+    from ragexp.fingerprint import is_absolute_path
+
+    assert is_absolute_path(value) is expected
