@@ -173,9 +173,10 @@ def test_commit_allowed_when_clean(tmp_path: Path) -> None:
 def test_ruff_formats_python_file(tmp_path: Path) -> None:
     f = tmp_path / "messy.py"
     f.write_text("import os\nx=( 1,2 )\n", encoding="utf-8")
-    code, _ = ruff_on_edit.decide({"tool_input": {"file_path": str(f)}})
-    assert code == 0
-    assert f.read_text(encoding="utf-8") == "x = (1, 2)\n"  # 포맷 + 안 쓰는 import 제거
+    code, msg = ruff_on_edit.decide({"tool_input": {"file_path": str(f)}})
+    # 포맷은 하되, 안 쓰는 import는 지우지 않고 알리기만 한다(나눠 고치는 중간에 지워지지 않게).
+    assert f.read_text(encoding="utf-8") == "import os\n\nx = (1, 2)\n"
+    assert code == 2 and "F401" in msg
 
 
 def test_ruff_reports_unfixable(tmp_path: Path) -> None:

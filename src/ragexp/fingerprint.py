@@ -62,10 +62,14 @@ _POSIX_ABS_RE = re.compile(r"^/[^/\s]+/")
 _POSIX_ROOTS_RE = re.compile(
     r"(?<![\w.~/])/(home|Users|root|mnt|data|tmp|var|opt|srv|media|Volumes|private|workspace|models)/"
 )
-# 스킴 없는 주소: IPv4(포트 있든 없든), 호스트:포트(예: gpu-01:8000, a.b.c:443/v1).
-_IPV4_RE = re.compile(r"(?<![\d.])\d{1,3}(\.\d{1,3}){3}(?![\d.])")
-# 호스트는 글자로 시작해야 한다("12:30" 같은 시각은 주소가 아님).
-_HOST_PORT_RE = re.compile(r"^(localhost|[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z0-9-]+)*):\d{2,5}(/\S*)?$")
+# 스킴 없는 주소를 문자열 **어디서든** 찾는다(문장 속, 조사·마침표가 붙어도).
+# IPv4: 뒤에 문장 마침표는 허용("10.0.0.5."), 숫자가 이어지면 아님.
+_IPV4_RE = re.compile(r"(?<![\d.])\d{1,3}(\.\d{1,3}){3}(?!\.?\d)")
+# 호스트:포트: 호스트는 영문으로 시작("12:30" 시각은 아님), 포트 뒤에 영문·숫자가 이어지면 아님
+# ("qwen3:32b" 같은 모델 태그는 주소가 아님). 한국어 조사·문장 부호는 붙어도 주소로 본다.
+_HOST_PORT_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(localhost|[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z0-9-]+)*):\d{2,5}(?![A-Za-z0-9_])"
+)
 
 
 class FingerprintError(ValueError):
@@ -87,8 +91,19 @@ def _bad_name(name: str, allow: frozenset[str]) -> bool:
 
 
 def has_address(value: str) -> bool:
-    """문자열에 주소(스킴 있는 URL, IPv4, 호스트:포트)가 들어 있는지 본다."""
-    return "://" in value or bool(_IPV4_RE.search(value) or _HOST_PORT_RE.match(value))
+    """문자열 어디에든 주소(스킴 있는 URL, IPv4, 호스트:포트)가 있는지 본다."""
+    return "://" in value or bool(_IPV4_RE.search(value) or _HOST_PORT_RE.search(value))
+
+
+# 흔한 비밀값 꼴(Bearer 토큰, OpenAI·HF 형식 키). 구성 원문 어디에 있든 거부한다.
+_SECRET_RE = re.compile(
+    r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}|\bsk-[A-Za-z0-9_-]{16,}|\bhf_[A-Za-z0-9]{20,}"
+)
+
+
+def has_secret_pattern(value: str) -> bool:
+    """문자열에 흔한 비밀값 꼴(Bearer …, sk-…, hf_…)이 있는지 본다."""
+    return bool(_SECRET_RE.search(value))
 
 
 def _is_model_key(path: str) -> bool:

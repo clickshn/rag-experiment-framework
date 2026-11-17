@@ -1,0 +1,28 @@
+# 설계 §5 예시를 R0 형태로 고친 구성(생성만 수준, 접속 칸은 ${VAR}, 판정 id·role)
+name: law-generation-v1
+level: generation_only
+corpus:   {type: fake_corpus, snapshot_sha256: "law-2026-11-17-sha"}
+chunker:  {type: fake_chunker}
+retriever: {type: fake_oracle, distractors: 2, seed: 7}
+generators:            # 비교할 구성(A·B …)
+  A:
+    type: fake_chat
+    base_url: ${GEN_A_URL}
+    api_key: ${GEN_A_KEY}
+    model: gpt-x
+    params: {temperature: 0, max_tokens: 2048}
+    meta: {price_per_1m_input: 0.0, price_per_1m_output: 0.0, deploy: cloud}   # 가격표 값을 넣음
+  B:
+    type: fake_chat
+    base_url: ${LOCAL_URL}
+    model: Qwen3.5-27B-FP8
+    params: {temperature: 0, max_tokens: 2048}
+    meta: {gpu_cost_per_hour: 0.0, vram_gb: 31, license: Apache-2.0, deploy: on_prem}
+    run: {concurrency: 4, timeout_s: 180}
+prompt: prompt.md
+judges:
+  - {type: fake_rules, role: rules}
+  - {id: judge1, type: fake_llm, role: primary, base_url: "${JUDGE1_URL}", model: gemma-4-31B-it}
+  - {id: judge2, type: fake_llm, role: secondary, base_url: "${JUDGE2_URL}", model: claude-x}
+questions: questions.jsonl
+repeats: 3

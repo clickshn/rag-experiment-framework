@@ -151,13 +151,19 @@ class Judge(Protocol):
 
 이름만 보고도 어떤 부품이 있는지 알 수 있어서, 실제로 쓰는 부품만 그때 불러온다. 쓰는 부품을 불러오지 못하면 플러그인 이름을 담아 실행 전에 멈춘다. 쓰지 않는 플러그인의 문제는 경고만 낸다. 내장 부품도 같은 방식으로 등록한다.
 
+**부품이 지킬 약속**(구성 로더가 쓰는 것):
+
+- 생성기는 설정으로 `prompt_template: str`(프롬프트 파일 내용)을 받는다. `ragexp.config.GeneratorSettings`를 상속하면 된다. 렌더링 코드가 바뀌면 생성기 `version`을 올린다.
+- 접속 칸(`base_url`, `api_key` …)을 받는 부품은 `config_model`에서 그 칸을 `SecretStr`로 선언한다. 접속 칸은 설정 맨 위에만 둔다.
+- 판정 부품은 `judge_kind`(`code`·`model`)를 밝힐 수 있다. 그러면 로더가 판정 역할(`role`)과 맞는지 검사한다(code는 rules만, model은 rules 불가).
+
 ### 모델 호출 통로
 
 모든 모델 호출(생성·임베딩·리랭크·판정)은 하나의 클라이언트 층을 지난다. 여기서 재시도, 시간 제한, 토큰·지연 기록, 응답의 실제 모델 이름 확인, 잘림(finish\_reason) 구분을 한 곳에서 처리한다. P0의 게이트웨이를 단순화한 것이고, 데이터 등급 통제는 선택 기능으로 둔다.
 
 ## 5. 구성 파일과 버전
 
-실험 조건은 YAML 하나에 모두 적는다. 실행하면 이 YAML과 각 부품의 fingerprint를 합쳐 해시(구성 버전)를 만들고, 실행 기록에 남긴다.
+실험 조건은 YAML 하나에 모두 적는다. 실행하면 각 부품의 fingerprint와 공통 값(level, 프롬프트 내용 해시 등)으로 arm별 구성 버전과 나머지 해시를 만들고, 원재료와 함께 실행 기록에 남긴다(아래 표).
 
 ```yaml
 # experiments/law_hybrid.yaml (예시)
@@ -179,25 +185,34 @@ generators:            # 비교할 구성(A·B …)
     type: openai_compat
     base_url: ${LOCAL_URL}
     model: Qwen3.5-27B-FP8
+    revision: 1a2b3c4      # 선택. 같은 이름·다른 가중치를 구분(HF 커밋 해시 등)
     params: {temperature: 0, max_tokens: 2048}
     meta: {gpu_cost_per_hour: 0.0, vram_gb: 31, license: Apache-2.0, deploy: on_prem}
+    run: {concurrency: 4, timeout_s: 180, max_retries: 2}   # 실행 설정(해시 밖)
 prompt: prompts/law_qa_v1.md
 judges:
-  - {type: rules}
-  - {type: llm, base_url: ${JUDGE1_URL}, model: gemma-4-31B-it}
-  - {type: llm, base_url: ${JUDGE2_URL}, model: claude-x}
+  - {type: rules, role: rules}                                              # 코드 규칙(채점 버전에 들어감)
+  - {id: judge1, type: llm, role: primary, base_url: ${JUDGE1_URL}, model: gemma-4-31B-it}   # 주 판정
+  - {id: judge2, type: llm, role: secondary, base_url: ${JUDGE2_URL}, model: claude-x}   # 보조 판정(기록만)
 questions: datasets/law-v1/dev.jsonl
 repeats: 3
-level: full   # retrieval_only(검색만) | generation_only(정답 근거 주입) | full(처음부터 끝까지)
+level: full   # retrieval_only(검색만) | generation_only(정답 근거 주입) | full(처음부터 끝까지). R0는 generation_only만
+run: {invalid_ratio_max: 0.05}   # 실행 무효 상한(해시 밖)
 ```
 
-### 버전 세 가지
+### 버전 세 가지와 실행 묶음 해시
 
 | 버전 | 무엇이 들어가나 | 바뀌면 |
 | --- | --- | --- |
-| 구성 버전 | 말뭉치 스냅샷 해시, 청킹·임베딩·검색·리랭크·생성 설정과 fingerprint, 프롬프트 파일 내용 | 다른 실험 |
-| 채점 버전 | 판정 모델·프롬프트·디코딩, 규칙 코드 버전, 점검 문항, 합격선 | 점수를 서로 비교할 수 없음 |
-| 문항 세트 버전 | 문항 파일 내용 해시 | 다른 시험 |
+| 구성 버전(`cfg-`, **arm마다**) | level, level이 쓰는 공통 부품(말뭉치·청킹·검색 …)의 fingerprint, 프롬프트 내용 해시, 그 arm의 생성 모델 fingerprint. arm 이름은 넣지 않는다 | 다른 실험 |
+| 채점 버전(`jdg-`) | 코드 규칙 판정의 fingerprint, 주 판정의 fingerprint(모델·revision·디코딩·템플릿·version), 합치는 규칙. 점검 문항·합격선은 U7·R4에서 더한다 | 점수를 서로 비교할 수 없음 |
+| 문항 세트 버전(`qs-`) | 문항마다 파싱한 내용(기본값 칸 제외)의 해시를 qid 순으로 정렬해 해시. 파일의 줄 순서·공백·키 순서와 무관 | 다른 시험 |
+| 실행 묶음 해시(`run-`) | arm 이름별 구성 버전, 문항 세트 버전, repeats. 채점 버전은 넣지 않는다(한 실행에서 다시 채점할 수 있게) | 이어서 돌 수 없음 |
+
+- **보조 판정**(점수에 쓰지 않는 판정)은 채점 버전에 넣지 않는다. 각자의 fingerprint로 따로 기록한다. 보조 판정을 더하거나 바꿔도 채점 버전은 그대로다. 교차 판정이 점수에 들어가면(R4) 그때 채점 버전에 넣는다.
+- **해시 규칙**: YAML 원문이 아니라 부품 fingerprint와 공통 값만 해시한다. 값은 기본값을 채운 뒤의 값(effective value)이고, `None`인 칸만 뺀다. `None`이 아닌 기본값을 가진 칸을 새로 더하거나 기본값·동작을 바꾸면 부품 `version`을 올린다. 정규화 규칙 자체를 바꾸면 해시 규칙 버전(`scheme`)을 올린다. 프레임워크 버전은 기록만 한다.
+- **안 쓰는 부품**(예: 생성만 수준의 embedder)은 등록된 이름인지만 확인하고, 만들지도 해시하지도 않는다(경고).
+- **원재료**: 해시마다 원재료(정규 JSON으로 만들기 전 값)를 `versions.json`에 함께 남긴다. 실행 기록만으로 해시를 다시 계산해 검증할 수 있다.
 
 **fingerprint에 넣는 것과 빼는 것** (부품이 내놓고, 레지스트리가 `type`·`version`을 붙인다. 판정 부품은 채점 버전으로, 나머지는 구성 버전으로 간다.)
 
@@ -212,6 +227,7 @@ level: full   # retrieval_only(검색만) | generation_only(정답 근거 주입
 `check_fingerprint`가 금지 이름과 금지 값을 검사해 멈춘다. 이름은 대소문자·하이픈을 무시하고 중첩까지 본다. 금지 값은 URL, IPv4, 호스트:포트, `${`, 절대 로컬 경로, NaN이다. 끝말·접두어 규칙(`*_key`, `price*` 등)에 걸리는 정상 파라미터는 부품이 `fingerprint_allow`로 선언해 풀 수 있다. 정확한 금지 이름(`api_key`, `base_url`, `meta`, `oc` 등)은 풀 수 없다.
 
 - 비밀값(`${...}`)과 주소는 해시에 넣지 않는다. 같은 모델을 다른 서버에서 돌려도 같은 구성으로 본다. 대신 응답의 실제 모델 이름을 기록해 다르면 경고한다.
+- **`${VAR}`는 접속 칸(`base_url`, `api_key`, `oc` …)에만** 쓰고, 접속 칸에는 `${VAR}`만 쓴다. YAML에 주소를 직접 쓰면 값·키·주석·meta 어디든 거부한다(마스킹하지 않음). 주석은 원문 텍스트를 줄 단위로 검사한다. 이 검사를 통과한 치환 전 원문만 `runs/<id>/config.yaml`에 저장한다.
 - 값이 하나라도 비어 있거나 알 수 없는 이름이면 실행 전에 멈춘다.
 - 비교 화면은 세 버전 중 무엇이 같고 다른지를 먼저 보여 준다. 채점 버전이 다르면 나란히 놓지 않는다.
 
@@ -264,6 +280,8 @@ variants:
 ```
 
 provenance에 누가 만들고 누가 검토했는지 남겨, 나중에 "사람이 쓴 문항"과 "LLM이 쓴 문항"의 난이도를 따로 볼 수 있게 한다.
+
+문항 세트 버전은 파일 바이트가 아니라 파싱한 문항(기본값 칸 제외)으로 계산한다(§5 표). provenance가 바뀌면 다른 세트다.
 
 ## 7. 실행·채점·게이트
 
@@ -345,7 +363,7 @@ workspace/
 ├─ datasets/<name>/            # 문항: draft/ reviewed/ frozen/{dev,val,test}.jsonl + manifest
 ├─ indexes/<해시>/             # 청킹·임베딩 결과 캐시(같은 구성이면 다시 안 만듦)
 ├─ runs/<run_id>/
-│  ├─ config.yaml · versions.json
+│  ├─ config.yaml · versions.json   # 치환 전 원문 · 버전 해시와 원재료·보조 판정 기록
 │  ├─ items.jsonl              # 항목별 검색·답·지연
 │  ├─ judgments/<채점 버전>.jsonl
 │  ├─ human/<표본>.jsonl          # 사람 채점
