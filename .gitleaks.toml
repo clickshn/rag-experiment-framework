@@ -1,0 +1,11 @@
+# gitleaks 설정: 기본 규칙에 시험용 가짜 키 허용만 더한다.
+title = "rag-experiment-framework gitleaks"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "시험 고정 자료의 가짜 키(sk-test-…): 경로와 패턴이 둘 다 맞을 때만"
+condition = "AND"
+paths = ['''^tests/fixtures/''']
+regexes = ['''sk-test-[A-Za-z0-9_-]+''']

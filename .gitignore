@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.*_cache/
+build/
+dist/
+*.egg-info/
+
+# 비밀값
+.env
+.env.*
+!.env.example
+
+# 실행 산출물
+workspace/
+*.sqlite
+
+# Claude Code 개인 설정
+.claude/settings.local.json
+
+# 대시보드(R1)
+web/node_modules/
+web/dist/
