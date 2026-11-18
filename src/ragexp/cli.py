@@ -1,6 +1,10 @@
 """ragexp 명령줄 진입점."""
 
 import json
+import os
+import re
+from datetime import date
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
@@ -8,6 +12,7 @@ import typer
 
 from ragexp import __version__
 from ragexp.config import ConfigError, load_config
+from ragexp.datasets import law_api
 from ragexp.datasets.questions import load_questions
 from ragexp.registry import RegistryError, default_registry
 from ragexp.versioning import compute_versions, duplicate_arm_warnings
@@ -23,6 +28,17 @@ config_app = typer.Typer(
     help="실험 구성(YAML) 다루기.", no_args_is_help=True, pretty_exceptions_show_locals=False
 )
 app.add_typer(config_app, name="config")
+corpus_app = typer.Typer(
+    help="말뭉치 수집·스냅샷.", no_args_is_help=True, pretty_exceptions_show_locals=False
+)
+app.add_typer(corpus_app, name="corpus")
+
+DEFAULT_SNAPSHOT_ROOT = Path("workspace") / "snapshots"
+
+
+class ProxyOption(StrEnum):
+    none = "none"
+    env = "env"
 
 
 def _version_callback(value: bool) -> None:
@@ -99,3 +115,53 @@ def _fail(messages: list[str], as_json: bool) -> NoReturn:
         for m in messages:
             typer.echo(f"오류: {m}", err=True)
     raise typer.Exit(code=1)
+
+
+@corpus_app.command("fetch-law")
+def corpus_fetch_law(
+    laws: Annotated[
+        list[str], typer.Option("--law", help="법령명(정확히 같게). 여러 번 줄 수 있다")
+    ],
+    as_of: Annotated[str, typer.Option("--as-of", help="기준일 YYYY-MM-DD(그날 시행 중인 판)")],
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out", help="스냅샷 폴더(기본 workspace/snapshots/law-ko-<기준일 YYYYMMDD>)"
+        ),
+    ] = None,
+    proxy: Annotated[
+        ProxyOption,
+        typer.Option("--proxy", help="none: 프록시 안 씀(기본), env: 환경 변수 프록시를 따름"),
+    ] = ProxyOption.none,
+) -> None:
+    """국가법령정보센터에서 법령의 기준일 판을 받아 스냅샷을 만든다.
+
+    인증키는 환경 변수 LAW_API_OC로만 받는다.
+    """
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", as_of):
+        _fail(["--as-of는 YYYY-MM-DD 꼴이어야 합니다"], False)
+    try:
+        as_of_date = date.fromisoformat(as_of)
+    except ValueError:
+        _fail(["--as-of가 올바른 날짜가 아닙니다"], False)
+    oc = law_api.oc_from_env(os.environ)
+    if oc is None:
+        _fail([law_api.MISSING_OC], False)
+    out_dir = out if out is not None else DEFAULT_SNAPSHOT_ROOT / f"law-ko-{as_of_date:%Y%m%d}"
+    try:
+        result = law_api.fetch_law_snapshot(laws, as_of_date, out_dir, oc=oc, proxy=proxy.value)
+    except law_api.LawFetchError as exc:
+        _fail([str(exc)], False)
+    except OSError as exc:
+        _fail([f"스냅샷 폴더를 쓸 수 없습니다({type(exc).__name__})"], False)
+
+    m = result.manifest
+    typer.echo(f"스냅샷: {result.path} (기준일 {m.as_of}, 받은 시각 {m.fetched_at})")
+    for e in m.laws:
+        typer.echo(
+            f"  {e.name}: 법령ID {e.law_id}, MST {e.mst}, 시행일자 {e.effective_date}, "
+            f"{e.bytes:,}바이트"
+        )
+    typer.echo(f"내용 해시: {m.content_hash}")
+    echoed = "예(검색 응답은 저장하지 않음)" if result.search_echoes_oc else "아니오"
+    typer.echo(f"참고: 검색 응답에 인증키가 들어 있었나: {echoed}")
